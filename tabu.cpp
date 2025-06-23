@@ -1,262 +1,213 @@
-#include "bits/stdc++.h"
 #include <iostream>
-#include <fstream>     
-#include <string>      
-#include <vector>      
+#include <fstream>
+#include <string>
+#include <vector>
 #include <utility>
 #include <chrono>
-#include <ctime>
-#include <cmath>         
-#include <bitset>
+#include <cmath>
 #include <random>
 #include <algorithm>
+#include <bitset>
+#include <cassert> // Para testes de sanidade (debug)
 
 using namespace std;
 
-typedef long long ll;
-
+// --- Variáveis Globais (Dados do Problema) ---
 int itens, quant_conj, capacidade;
-vector<int> lucro,peso; //Lucro e peso do item i
-vector<vector<int> > conju; //Lista de conjunto que o item i pertence (conj[i] = lista)
-vector<pair<int,int> > inf_conj;//(Limite de itens na solução,Penalidade) do conjunto i
+vector<int> lucro, peso;
+vector<vector<int>> conju;
+vector<pair<int, int>> inf_conj;
 
-mt19937_64 rng((int) std::chrono::steady_clock::now().time_since_epoch().count());
+mt19937_64 rng((int)chrono::steady_clock::now().time_since_epoch().count());
 
-const int tabuListMaxSize = 10000;
+// --- Parâmetros da Meta-heurística ---
+const double tempoLimite = 2.0;
+const int TABU_TENURE = 10;
 
-const double tempoLimite = 0.6;
-double alpha = 0.8;
+// Função para calcular o valor total de uma solução.
+// Usada apenas para a solução inicial, não no loop principal.
+int calculate_initial_state(const bitset<1000>& solution, int& out_somaPeso, vector<int>& itemsPorConj) {
+    out_somaPeso = 0;
+    int current_valor = 0;
+    int current_penalidade = 0;
+    fill(itemsPorConj.begin(), itemsPorConj.end(), 0);
 
-int iterationsWithoutIncreasing = 0;
-
-//Função meta-heurística
-
-int TABU(){
-    iterationsWithoutIncreasing = 0;
-
-    //Will be used to xor hash tabu list
-    
-    uniform_int_distribution<ll> uid(0, 1LL<<60);
-    vector<ll> rndVal(itens, 0);
-    for(ll &i: rndVal) i = uid(rng);
-    set<ll> tabulist;
-    queue<ll> moveQueue;
-
-    bitset<1000> includedItems;
-    ll currHash = 0;
-    int somaValor = 0, somaPenalidade = 0, somaPeso = 0;
-    vector<int> itemsPorConj(quant_conj, 0);
-
-    // Começa com conjunto aleatório
-
-    vector<int> perm(itens);
-    for(int i = 0; i < itens; i++) perm[i] = i;
-
-    shuffle(perm.begin(), perm.end(), rng);
-
-    // O tabu não tem solução
-
-    // for(int currItem: perm){     
-    //     int incluso = uid(rng)%60;
-
-    //     if(currItem >= itens) return -1;
-
-    //     if(incluso == 1){
-    //         if(peso[currItem] + somaPeso > capacidade) continue;
-    //         int nValor = somaValor, nPenalidade = somaPenalidade;
-    //         nValor += lucro[currItem];
-    //         for(int currConj: conju[currItem]){
-    //             int diff = itemsPorConj[currConj]+1 - inf_conj[currConj].first;
-    //             if(diff <= 0) continue;
-    //             nPenalidade += inf_conj[currConj].second;
-    //         }
-            
-    //         if(somaValor - somaPenalidade > nValor - nPenalidade) {  // não quero pegar solução inicial muito ruim
-    //             continue;
-    //         }
-
-    //         currHash ^= rndVal[currItem];
-
-    //         somaValor += lucro[currItem];
-    //         includedItems[currItem] = 1;
-    //         for(int currConj: conju[currItem]){
-    //             itemsPorConj[currConj]++;
-    //             int diff = itemsPorConj[currConj] - inf_conj[currConj].first;
-    //             if(diff <= 0) continue;
-    //             somaPenalidade += inf_conj[currConj].second;
-    //         }
-    //         somaPeso += peso[currItem];
-    //     }
-    // }
-
-    vector<pair<double, int>> candidates(itens);
-    for(int i = 0; i < itens; i++) candidates[i] = { peso[i] == 0 ? 1e9+lucro[i] : lucro[i]/peso[i] , i};
-    sort(candidates.rbegin(), candidates.rend());
-
-    double prob = 0.8;
-
-    for(auto[comp, currItem]: candidates){
-        double randProb = uid(rng)/double(1LL<<60);
-        
-        if(randProb < prob){
-            if(peso[currItem] + somaPeso > capacidade) continue;
-
-            somaValor += lucro[currItem];
-            includedItems[currItem] = 1;
-            for(int currConj: conju[currItem]){
-                itemsPorConj[currConj]++;
-                int diff = itemsPorConj[currConj] - inf_conj[currConj].first;
-                if(diff <= 0) continue;
-                somaPenalidade += inf_conj[currConj].second;
+    for (int i = 0; i < itens; ++i) {
+        if (solution[i]) {
+            out_somaPeso += peso[i];
+            current_valor += lucro[i];
+            for (int cj : conju[i]) {
+                itemsPorConj[cj]++;
             }
-            somaPeso += peso[currItem];
-
-            // decai mais rápido ao longo do tempo
-            prob *= alpha;
-            alpha *= 0.2;
         }
     }
+    if (out_somaPeso > capacidade) return -2e9;
 
-    // Começa o algoritmo
-
-    int best = somaValor - somaPenalidade;
-
-    moveQueue.push(currHash);
-    tabulist.insert(currHash);
-
-    auto start = chrono::high_resolution_clock::now();
-
-    auto agora = chrono::high_resolution_clock::now();
-
-    int iter = 0;
-
-    while((std::chrono::duration<double>(agora - start)).count() < tempoLimite && iterationsWithoutIncreasing < 300){
-        int OLD = best;
-        pair<int,int> currBest = {-1e9,-1e9};
-        iter++;
-
-        for(int itemFlip = 0; itemFlip < itens; itemFlip++){
-            if(std::chrono::duration<double>(agora - start).count() > tempoLimite) break;
-            ll novaHash = currHash ^ rndVal[itemFlip];
-            if(tabulist.find(novaHash) != tabulist.end()) {continue;}
-            
-            int novoLucro = somaValor - somaPenalidade;
-            if(includedItems[itemFlip]){
-                novoLucro -= lucro[itemFlip];
-                for(int currConj: conju[itemFlip]){
-                    int diff = itemsPorConj[currConj] - inf_conj[currConj].first;
-                    if(diff <= 0) continue;
-                    novoLucro += inf_conj[currConj].second;
-                }
-            }
-            else{
-                if(somaPeso + peso[itemFlip] > capacidade) {continue;}
-                novoLucro += lucro[itemFlip];
-                for(int currConj: conju[itemFlip]){
-                    int diff = itemsPorConj[currConj]+1 - inf_conj[currConj].first;
-                    if(diff <= 0) continue;
-                    novoLucro -= inf_conj[currConj].second;
-                }
-            }
-            currBest = max(currBest, make_pair(novoLucro, itemFlip));
+    for (int j = 0; j < quant_conj; ++j) {
+        if (itemsPorConj[j] > inf_conj[j].first) {
+            current_penalidade += (itemsPorConj[j] - inf_conj[j].first) * inf_conj[j].second;
         }
-
-        auto [bestAns, itemFlip] = currBest;
-        best = max(best, bestAns);
-
-        if(bestAns == -1e9) break;
-
-        currHash ^= rndVal[itemFlip];
-        while(tabulist.size() > tabuListMaxSize){
-            if(moveQueue.size() == 0) {tabulist.clear(); break;}
-            ll lastMov = moveQueue.front(); moveQueue.pop();
-            tabulist.erase(lastMov);
-        }
-        moveQueue.push(currHash);
-        tabulist.insert(currHash);
-
-        if(includedItems[itemFlip]){
-            includedItems[itemFlip] = 0;
-            somaPeso -= peso[itemFlip];
-            somaValor -= lucro[itemFlip];
-            for(int currConj: conju[itemFlip]){
-                itemsPorConj[currConj]--;
-                int diff = itemsPorConj[currConj]+1 - inf_conj[currConj].first;
-                if(diff <= 0) continue;
-                somaPenalidade -= inf_conj[currConj].second;
-            }
-        }
-        else{
-            includedItems[itemFlip] = 1;
-            somaPeso += peso[itemFlip];
-            somaValor += lucro[itemFlip];
-            for(int currConj: conju[itemFlip]){
-                itemsPorConj[currConj]++;
-                int diff = itemsPorConj[currConj] - inf_conj[currConj].first;
-                if(diff <= 0) continue;
-                somaPenalidade += inf_conj[currConj].second;
-            }
-        }
-
-        agora = chrono::high_resolution_clock::now();
-
-        if(best == OLD) iterationsWithoutIncreasing++;
-        else iterationsWithoutIncreasing = 0;
     }
-
-    cout << iter << ' ' << std::chrono::duration<double>(agora - start).count() << endl;
-
-    return best;
+    return current_valor - current_penalidade;
 }
 
-int main(int argc, char* argv[]){
+
+int TABU_Optimized() {
+    // --- Estado da Solução ---
+    bitset<1000> currentSolution;
+    int somaPeso = 0;
+
+    // --- Inicialização (Gulosa) ---
+    vector<pair<double, int>> candidates(itens);
+    for (int i = 0; i < itens; i++) {
+        candidates[i] = { (peso[i] == 0 ? 1e12 + lucro[i] : (double)lucro[i] / peso[i]), i };
+    }
+    sort(candidates.rbegin(), candidates.rend());
+    
+    for (auto const& [ratio, currItem] : candidates) {
+        if (somaPeso + peso[currItem] <= capacidade) {
+            currentSolution[currItem] = 1;
+            somaPeso += peso[currItem];
+        }
+    }
+
+    // --- Variáveis da Busca Tabu ---
+    // O estado completo (incluindo itemsPorConj) é calculado apenas UMA VEZ.
+    vector<int> itemsPorConj(quant_conj, 0);
+    int currentValue = calculate_initial_state(currentSolution, somaPeso, itemsPorConj);
+    
+    bitset<1000> bestSolution = currentSolution;
+    int bestValue = currentValue;
+    
+    vector<int> tabuList(itens, 0);
+    int iterationsWithoutImproving = 0;
+    
+    auto start_time = chrono::high_resolution_clock::now();
+    int iter = 0;
+
+    // --- Loop Principal da Busca Tabu (OTIMIZADO) ---
+    while (true) {
+        auto current_time = chrono::high_resolution_clock::now();
+        double elapsed_time = chrono::duration<double>(current_time - start_time).count();
+        if (elapsed_time > tempoLimite || iterationsWithoutImproving > 500) {
+            break;
+        }
+        iter++;
+
+        // Encontrar o melhor vizinho não-tabu (ou que satisfaça o critério de aspiração)
+        int best_neighbor_value = -2e9;
+        int best_move_item = -1;
+        int best_move_delta = 0;
+
+        for (int itemFlip = 0; itemFlip < itens; ++itemFlip) {
+            // 1. AVALIAÇÃO DELTA: Calcular a mudança no valor de forma rápida
+            int delta = 0;
+            if (currentSolution[itemFlip]) { // Tentar REMOVER
+                delta = -lucro[itemFlip];
+                for (int cj : conju[itemFlip]) {
+                    if (itemsPorConj[cj] > inf_conj[cj].first) {
+                        delta += inf_conj[cj].second;
+                    }
+                }
+            } else { // Tentar ADICIONAR
+                if (somaPeso + peso[itemFlip] > capacidade) continue;
+                delta = lucro[itemFlip];
+                for (int cj : conju[itemFlip]) {
+                    if (itemsPorConj[cj] + 1 > inf_conj[cj].first) {
+                        delta -= inf_conj[cj].second;
+                    }
+                }
+            }
+
+            int neighbor_value = currentValue + delta;
+            
+            bool is_tabu = (tabuList[itemFlip] > iter);
+            bool aspiration_met = (neighbor_value > bestValue);
+
+            if ((!is_tabu) || aspiration_met) {
+                if (neighbor_value > best_neighbor_value) {
+                    best_neighbor_value = neighbor_value;
+                    best_move_item = itemFlip;
+                    best_move_delta = delta;
+                }
+            }
+        }
+
+        if (best_move_item == -1) break; 
+        
+        // Realiza o melhor movimento encontrado e atualiza o estado INCREMENTALMENTE
+        currentSolution.flip(best_move_item);
+        currentValue += best_move_delta; 
+
+        if (currentSolution[best_move_item]) { // Se o item foi adicionado
+            somaPeso += peso[best_move_item];
+            for (int cj : conju[best_move_item]) itemsPorConj[cj]++;
+        } else { // Se o item foi removido
+            somaPeso -= peso[best_move_item];
+            for (int cj : conju[best_move_item]) itemsPorConj[cj]--;
+        }
+
+        // Atualiza a lista tabu
+        tabuList[best_move_item] = iter + TABU_TENURE;
+        
+        // Atualiza a melhor solução global
+        if (currentValue > bestValue) {
+            bestValue = currentValue;
+            bestSolution = currentSolution;
+            iterationsWithoutImproving = 0;
+        } else {
+            iterationsWithoutImproving++;
+        }
+    }
+
+    return bestValue;
+}
+
+
+int main(int argc, char* argv[]) {
+    // ... (o seu main continua igual aqui) ...
     if (argc != 3) {
-        std::cerr << "Falta algumentos";
-        return 1; 
+        cerr << "Uso: " << argv[0] << " <arquivo_entrada> <arquivo_saida>" << endl;
+        return 1;
     }
     string dir_entrada = argv[1];
     string dir_saida = argv[2];
 
-    //Abre arquivo de entrada
     ifstream arquivo(dir_entrada);
-    if (!(arquivo.is_open())) {
+    if (!arquivo.is_open()) {
         cout << "Erro ao abrir o arquivo: " << dir_entrada << endl;
-        return -1;
+        return 1;
     }
 
-    //Início da leitura
-    //cout << "Estou lendo o arquivo:" << dir_entrada << endl;
     arquivo >> itens >> quant_conj >> capacidade;
-    lucro.assign(itens,0);peso.assign(itens,0);
-    
-    for(int j = 0; j < itens; j++) arquivo >> lucro[j];
-    for(int j = 0; j < itens; j++) arquivo >> peso[j];
+    lucro.assign(itens, 0);
+    peso.assign(itens, 0);
 
-    conju.assign(itens,vector<int>()); 
-    inf_conj.assign(quant_conj,make_pair(0,0));
+    for (int j = 0; j < itens; j++) arquivo >> lucro[j];
+    for (int j = 0; j < itens; j++) arquivo >> peso[j];
 
-    for(int j = 0; j < quant_conj; j++){
+    conju.assign(itens, vector<int>());
+    inf_conj.assign(quant_conj, make_pair(0, 0));
+
+    for (int j = 0; j < quant_conj; j++) {
         int lim_conj, penalidade_conj, itens_conj;
         arquivo >> lim_conj >> penalidade_conj >> itens_conj;
-        inf_conj[j].first = lim_conj; 
-        inf_conj[j].second = penalidade_conj;
-
-        for(int k = 0; k < itens_conj; k++){
-            int item; arquivo >> item;
+        inf_conj[j] = {lim_conj, penalidade_conj};
+        for (int k = 0; k < itens_conj; k++) {
+            int item;
+            arquivo >> item;
             conju[item].push_back(j);
         }
     }
-    //Fim na leitura
+    arquivo.close();
 
-    //Calcular o tempo e solução
     auto start = chrono::high_resolution_clock::now();
-    int sol = TABU();
+    int sol = TABU_Optimized();
     auto end = chrono::high_resolution_clock::now();
     chrono::duration<double> time = end - start;
     double execution_time = time.count();
 
-    //Abre arquivo de saída
-    ofstream saida_arquivo(dir_saida,ios::app);
+    ofstream saida_arquivo(dir_saida, ios::app);
     if (!saida_arquivo.is_open()) {
         cout << "Erro ao abrir " << dir_saida << " para escrita.\n";
         return 1;

@@ -1,241 +1,233 @@
-#include "bits/stdc++.h"
-// #include <iostream>
-// #include <fstream>     
-// #include <string>      
-// #include <vector>      
-// #include <utility>
-// #include <chrono>
-// #include <ctime>
-// #include <cmath>         
-// #include <bitset>
-// #include <random>
-// #include <algorithm>
+#include <iostream>
+#include <fstream>
+#include <string>
+#include <vector>
+#include <utility>
+#include <chrono>
+#include <cmath>
+#include <random>
+#include <algorithm>
+#include <bitset>
+#include <cassert> // Para testes de sanidade (debug)
 
 using namespace std;
 
-typedef long long ll;
-
+// --- Variáveis Globais (Dados do Problema) ---
 int itens, quant_conj, capacidade;
-vector<int> lucro,peso; //Lucro e peso do item i
-vector<vector<int> > conju; //Lista de conjunto que o item i pertence (conj[i] = lista)
-vector<pair<int,int> > inf_conj;//(Limite de itens na solução,Penalidade) do conjunto i
+vector<int> lucro, peso;
+vector<vector<int>> conju;
+vector<pair<int, int>> inf_conj;
 
-mt19937_64 rng((int) std::chrono::steady_clock::now().time_since_epoch().count());
+mt19937_64 rng((int)chrono::steady_clock::now().time_since_epoch().count());
 
-const double tempoLimite = 0.6;
-double alpha = 0.2;
+// --- Parâmetros da Meta-heurística ---
+const double tempoLimite = 2.0;
 
-int iterationsWithoutIncreasing = 0;
+// Função para calcular o valor total de uma solução.
+// Usada para validação e no início, não no loop principal da busca local.
+int calculate_solution_value(const bitset<1000>& solution, int& out_somaPeso) {
+    out_somaPeso = 0;
+    int current_valor = 0;
+    int current_penalidade = 0;
+    vector<int> itemsPorConj(quant_conj, 0);
 
-bitset<1000> bestBIT;
-
-//Função meta-heurística
-
-int GRASP(){
-    iterationsWithoutIncreasing = 0;
-    uniform_int_distribution<ll> uid(0, 1LL<<60);
-
-    
-    // Começa o algoritmo
-    
-    int best = -1e9;
-    
-    auto start = chrono::high_resolution_clock::now();
-    
-    auto agora = chrono::high_resolution_clock::now();
-    
-    int iter = 0;
-    
-    vector<pair<double, int>> candidates(itens);
-    for(int i = 0; i < itens; i++) candidates[i] = { peso[i] == 0 ? 1e9+lucro[i] : lucro[i]/peso[i] , i};
-    sort(candidates.rbegin(), candidates.rend());
-
-    double base = 0.85;
-    
-    while((std::chrono::duration<double>(agora - start)).count() < tempoLimite && iterationsWithoutIncreasing < 300){
-        int OLD = best;
-        iter++;
-        
-        bitset<1000> includedItems;
-        vector<int> itemsPorConj(quant_conj, 0);
-        int somaValor = 0, somaPenalidade = 0, somaPeso = 0;
-        
-        double prob = base;
-        base *= 0.95;
-        base = max(base, 0.1);
-        alpha *= 1.05;
-        alpha = min(alpha, 0.8);
-
-
-
-        for(auto[comp, currItem]: candidates){
-            double randProb = uid(rng)/double(1LL<<60);
-            
-            if(randProb < prob){
-                if(peso[currItem] + somaPeso > capacidade) continue;
-    
-                somaValor += lucro[currItem];
-                includedItems[currItem] = 1;
-                for(int currConj: conju[currItem]){
-                    itemsPorConj[currConj]++;
-                    int diff = itemsPorConj[currConj] - inf_conj[currConj].first;
-                    if(diff <= 0) continue;
-                    somaPenalidade += inf_conj[currConj].second;
-                }
-                somaPeso += peso[currItem];
-
-                // decai mais rápido ao longo do tempo
-                prob *= alpha;
+    for (int i = 0; i < itens; ++i) {
+        if (solution[i]) {
+            out_somaPeso += peso[i];
+            current_valor += lucro[i];
+            for (int cj : conju[i]) {
+                itemsPorConj[cj]++;
             }
         }
-        
-
-        if(best < somaValor - somaPenalidade) bestBIT = includedItems;
-        best = max(somaValor - somaPenalidade, best);
-
-        // Hill climbing para achar máximo local
-
-        for(int i = 0; i < itens; i++){
-            int itemFlip = candidates[i].second;
-            int novoLucro = somaValor - somaPenalidade;
-            if(includedItems[itemFlip]){
-                novoLucro -= lucro[itemFlip];
-                for(int currConj: conju[itemFlip]){
-                    int diff = itemsPorConj[currConj] - inf_conj[currConj].first;
-                    if(diff <= 0) continue;
-                    novoLucro += inf_conj[currConj].second;
-                }
-            }
-            else{
-                if(somaPeso + peso[itemFlip] > capacidade) continue;
-                novoLucro += lucro[itemFlip];
-                for(int currConj: conju[itemFlip]){
-                    int diff = itemsPorConj[currConj]+1 - inf_conj[currConj].first;
-                    if(diff <= 0) continue;
-                    novoLucro -= inf_conj[currConj].second;
-                }
-            }
-
-            int delta = novoLucro - (somaValor - somaPenalidade);
-            // best = max(best, novoLucro);
-            
-
-            // cout << novoLucro << endl;
-            // return novoLucro;
-
-            if(delta > 0){
-                if(includedItems[itemFlip]){
-                    includedItems[itemFlip] = 0;
-                    somaPeso -= peso[itemFlip];
-                    somaValor -= lucro[itemFlip];
-                    for(int currConj: conju[itemFlip]){
-                        itemsPorConj[currConj]--;
-                        int diff = itemsPorConj[currConj]+1 - inf_conj[currConj].first;
-                        if(diff <= 0) continue;
-                        somaPenalidade -= inf_conj[currConj].second;
-                    }
-                }
-                else{
-                    includedItems[itemFlip] = 1;
-                    somaPeso += peso[itemFlip];
-                    somaValor += lucro[itemFlip];
-                    for(int currConj: conju[itemFlip]){
-                        itemsPorConj[currConj]++;
-                        int diff = itemsPorConj[currConj] - inf_conj[currConj].first;
-                        if(diff <= 0) continue;
-                        somaPenalidade += inf_conj[currConj].second;
-                    }
-                }
-            }
-            else continue;
-
-            if(best < somaValor - somaPenalidade) bestBIT = includedItems;
-            best = max(best, somaValor - somaPenalidade);
-        }
-
-        agora = chrono::high_resolution_clock::now();
-
-        if(best == OLD) iterationsWithoutIncreasing++;
-        else iterationsWithoutIncreasing = 0;
     }
+    if (out_somaPeso > capacidade) return -2e9;
 
-    cout << best << ' ' << iter << endl;
-
-    // int check = 0;
-    // vector<int> itemsPorConj(quant_conj, 0);
-    // int somaValor = 0, somaPenalidade = 0, somaPeso = 0;
-
-    // for(int currItem = 0; currItem < itens; currItem++){
-    //     if(bestBIT[currItem]){
-    //         if(peso[currItem] + somaPeso > capacidade) return -1;
-
-    //         check += lucro[currItem];
-    //         for(int currConj: conju[currItem]){
-    //             itemsPorConj[currConj]++;
-    //             int diff = itemsPorConj[currConj] - inf_conj[currConj].first;
-    //             if(diff <= 0) continue;
-    //             check -= inf_conj[currConj].second;
-    //         }
-    //         somaPeso += peso[currItem];
-    //     }
-    // }
-
-    // if(check != best) {
-    //     cout << "Erro!!!!!! " << check << endl;    
-    //     return -1;
-    // }
-
-    return best;
+    for (int j = 0; j < quant_conj; ++j) {
+        if (itemsPorConj[j] > inf_conj[j].first) {
+            current_penalidade += (itemsPorConj[j] - inf_conj[j].first) * inf_conj[j].second;
+        }
+    }
+    return current_valor - current_penalidade;
 }
 
-int main(int argc, char* argv[]){
+// OTIMIZAÇÃO: Busca Local Rápida com Avaliação Delta
+// Recebe e modifica o estado da solução diretamente (por referência &)
+void FastLocalSearch(bitset<1000>& solution, int& solutionValue, int& solutionPeso, vector<int>& itemsPorConj) {
+    bool improvement_found = true;
+    while (improvement_found) {
+        improvement_found = false;
+
+        for (int itemFlip = 0; itemFlip < itens; ++itemFlip) {
+            // 1. Calcular o DELTA do movimento
+            int delta = 0;
+
+            if (solution[itemFlip]) { // Tentar REMOVER o item
+                delta = -lucro[itemFlip];
+                for (int cj : conju[itemFlip]) {
+                    // Se o item a ser removido mantinha este conjunto acima do limite,
+                    // a penalidade diminui (o que é um ganho, então delta aumenta).
+                    if (itemsPorConj[cj] > inf_conj[cj].first) {
+                        delta += inf_conj[cj].second;
+                    }
+                }
+            } else { // Tentar ADICIONAR o item
+                if (solutionPeso + peso[itemFlip] > capacidade) continue; // Vizinho inválido
+                delta = lucro[itemFlip];
+                for (int cj : conju[itemFlip]) {
+                    // Se adicionar este item faz o conjunto exceder o limite,
+                    // a penalidade aumenta (o que é uma perda, então delta diminui).
+                    if (itemsPorConj[cj] + 1 > inf_conj[cj].first) {
+                        delta -= inf_conj[cj].second;
+                    }
+                }
+            }
+
+            // 2. Checar se o movimento é vantajoso
+            if (delta > 0) {
+                // 3. ACEITAR O MOVIMENTO E ATUALIZAR O ESTADO INCREMENTALMENTE
+                solution.flip(itemFlip);
+                solutionValue += delta; // Atualização instantânea do valor!
+
+                // Atualizar o estado auxiliar (peso e contagem por conjunto)
+                if (solution[itemFlip]) { // Se o item foi adicionado
+                    solutionPeso += peso[itemFlip];
+                    for (int cj : conju[itemFlip]) itemsPorConj[cj]++;
+                } else { // Se o item foi removido
+                    solutionPeso -= peso[itemFlip];
+                    for (int cj : conju[itemFlip]) itemsPorConj[cj]--;
+                }
+                
+                improvement_found = true;
+                break; // Estratégia "First Improvement"
+            }
+        }
+    }
+}
+
+
+int GRASP() {
+    uniform_real_distribution<double> prob_dist(0.0, 1.0);
+
+    // --- Preparação dos Candidatos ---
+    vector<pair<double, int>> candidates(itens);
+    for (int i = 0; i < itens; i++) {
+        candidates[i] = { (peso[i] == 0 ? 1e12 + lucro[i] : (double)lucro[i] / peso[i]), i };
+    }
+    sort(candidates.rbegin(), candidates.rend());
+
+    // --- Variáveis do GRASP ---
+    int bestValue = -2e9;
+    bitset<1000> bestSolution;
+    int iterationsWithoutImproving = 0;
+    
+    // Buffer para contagem de itens, para ser reutilizado
+    vector<int> itemsPorConj_buffer(quant_conj, 0);
+
+    auto start_time = chrono::high_resolution_clock::now();
+
+    // --- Loop Principal do GRASP ---
+    while (true) {
+        auto current_time = chrono::high_resolution_clock::now();
+        double elapsed_time = chrono::duration<double>(current_time - start_time).count();
+        if (elapsed_time > tempoLimite || iterationsWithoutImproving > 300) {
+            break;
+        }
+
+        // ==========================================
+        //  FASE 1: CONSTRUÇÃO DE SOLUÇÃO SEMI-GULOSA
+        // ==========================================
+        bitset<1000> currentSolution;
+        int somaPeso = 0;
+        
+        double prob_alpha = 0.85; 
+        for (auto const& [ratio, currItem] : candidates) {
+            if (prob_dist(rng) < prob_alpha) {
+                if (somaPeso + peso[currItem] <= capacidade) {
+                    currentSolution[currItem] = 1;
+                    somaPeso += peso[currItem];
+                }
+            }
+            prob_alpha *= 0.97;
+        }
+        
+        // ==========================================
+        //  FASE 2: BUSCA LOCAL RÁPIDA
+        // ==========================================
+        // Primeiro, calcula o estado inicial completo para a busca local
+        int currentPeso;
+        int currentValue = calculate_solution_value(currentSolution, currentPeso);
+        
+        // Preenche o buffer de contagem de itens para a busca local
+        fill(itemsPorConj_buffer.begin(), itemsPorConj_buffer.end(), 0);
+        for(int i = 0; i < itens; ++i){
+            if(currentSolution[i]){
+                for(int cj : conju[i]){
+                    itemsPorConj_buffer[cj]++;
+                }
+            }
+        }
+        
+        // Chama a busca local otimizada
+        FastLocalSearch(currentSolution, currentValue, currentPeso, itemsPorConj_buffer);
+        
+        // --- Fim da Busca Local ---
+        
+        if (currentValue > bestValue) {
+            bestValue = currentValue;
+            bestSolution = currentSolution;
+            iterationsWithoutImproving = 0;
+        } else {
+            iterationsWithoutImproving++;
+        }
+    }
+
+    return bestValue;
+}
+
+int main(int argc, char* argv[]) {
+    // ... (o seu main continua igual aqui) ...
     if (argc != 3) {
-        std::cerr << "Falta algumentos";
-        return 1; 
+        cerr << "Uso: " << argv[0] << " <arquivo_entrada> <arquivo_saida>" << endl;
+        return 1;
     }
     string dir_entrada = argv[1];
     string dir_saida = argv[2];
 
-    //Abre arquivo de entrada
     ifstream arquivo(dir_entrada);
-    if (!(arquivo.is_open())) {
+    if (!arquivo.is_open()) {
         cout << "Erro ao abrir o arquivo: " << dir_entrada << endl;
-        return -1;
+        return 1;
     }
 
-    //Início da leitura
-    //cout << "Estou lendo o arquivo:" << dir_entrada << endl;
     arquivo >> itens >> quant_conj >> capacidade;
-    lucro.assign(itens,0);peso.assign(itens,0);
-    
-    for(int j = 0; j < itens; j++) arquivo >> lucro[j];
-    for(int j = 0; j < itens; j++) arquivo >> peso[j];
+    lucro.assign(itens, 0);
+    peso.assign(itens, 0);
 
-    conju.assign(itens,vector<int>()); 
-    inf_conj.assign(quant_conj,make_pair(0,0));
+    for (int j = 0; j < itens; j++) arquivo >> lucro[j];
+    for (int j = 0; j < itens; j++) arquivo >> peso[j];
 
-    for(int j = 0; j < quant_conj; j++){
+    conju.assign(itens, vector<int>());
+    inf_conj.assign(quant_conj, make_pair(0, 0));
+
+    for (int j = 0; j < quant_conj; j++) {
         int lim_conj, penalidade_conj, itens_conj;
         arquivo >> lim_conj >> penalidade_conj >> itens_conj;
-        inf_conj[j].first = lim_conj; 
-        inf_conj[j].second = penalidade_conj;
-
-        for(int k = 0; k < itens_conj; k++){
-            int item; arquivo >> item;
+        inf_conj[j] = {lim_conj, penalidade_conj};
+        for (int k = 0; k < itens_conj; k++) {
+            int item;
+            arquivo >> item;
             conju[item].push_back(j);
         }
     }
-    //Fim na leitura
+    arquivo.close();
 
-    //Calcular o tempo e solução
     auto start = chrono::high_resolution_clock::now();
     int sol = GRASP();
     auto end = chrono::high_resolution_clock::now();
     chrono::duration<double> time = end - start;
     double execution_time = time.count();
 
-    //Abre arquivo de saída
-    ofstream saida_arquivo(dir_saida,ios::app);
+    ofstream saida_arquivo(dir_saida, ios::app);
     if (!saida_arquivo.is_open()) {
         cout << "Erro ao abrir " << dir_saida << " para escrita.\n";
         return 1;
