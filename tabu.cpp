@@ -65,11 +65,16 @@ int TABU_Optimized(const string& convergence_filepath) {
     }
     sort(candidates.rbegin(), candidates.rend());
     
+    int somaPeso = 0;
+    double prob_alpha = 0.85; 
     for (auto const& [ratio, currItem] : candidates) {
-        if (somaPeso + peso[currItem] <= capacidade) {
-            currentSolution[currItem] = 1;
-            somaPeso += peso[currItem];
+        if (prob_dist(rng) < prob_alpha) {
+            if (somaPeso + peso[currItem] <= capacidade) {
+                currentSolution[currItem] = 1;
+                somaPeso += peso[currItem];
+            }
         }
+        prob_alpha *= 0.5;
     }
 
     // --- Variáveis da Busca Tabu ---
