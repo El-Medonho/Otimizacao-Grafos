@@ -1,3 +1,4 @@
+#include "bits/stdc++.h"
 #include <iostream>
 #include <fstream>
 #include <string>
@@ -12,6 +13,8 @@
 
 using namespace std;
 
+typedef long long ll;
+
 // --- Variáveis Globais (Dados do Problema) ---
 int itens, quant_conj, capacidade;
 vector<int> lucro, peso;
@@ -22,7 +25,7 @@ mt19937_64 rng((int)chrono::steady_clock::now().time_since_epoch().count());
 
 // --- Parâmetros da Meta-heurística ---
 const double tempoLimite = 2.0;
-const int TABU_TENURE = 10;
+const int TABU_TENURE = 100;
 
 // Função para calcular o valor total de uma solução.
 int calculate_initial_state(const bitset<1000>& solution, int& out_somaPeso, vector<int>& itemsPorConj) {
@@ -75,9 +78,20 @@ int TABU_Optimized(const string& convergence_filepath) {
     
     int bestValue = currentValue;
     
-    vector<int> tabuList(itens, 0);
+    map<ll,ll> tabuList;
     int iterationsWithoutImproving = 0;
     
+    uniform_int_distribution<ll> uid(0, 1e18);
+    vector<ll> rand_int(itens);
+    for(ll &i: rand_int) i = uid(rng);
+
+    ll chash = 0;
+    for(int i = 0; i < itens; i++){
+        if(currentSolution[i]) chash ^= rand_int[i];
+    }
+
+    tabuList[chash] = -1;
+
     auto start_time = chrono::high_resolution_clock::now();
     int iter = 0;
  
@@ -113,10 +127,11 @@ int TABU_Optimized(const string& convergence_filepath) {
             }
 
             int neighbor_value = currentValue + delta;
-            bool is_tabu = (tabuList[itemFlip] > iter);
-            bool aspiration_met = (neighbor_value > bestValue);
+            ll nHash = chash ^ rand_int[itemFlip];
+            int is_tabu = (tabuList.find(nHash) == tabuList.end()) ? 1e9 : tabuList[nHash];
+            bool aspiration_met = (is_tabu > bestValue);
 
-            if ((!is_tabu) || aspiration_met) {
+            if (aspiration_met) {
                 if (neighbor_value > best_neighbor_value) {
                     best_neighbor_value = neighbor_value;
                     best_move_item = itemFlip;
@@ -134,6 +149,8 @@ int TABU_Optimized(const string& convergence_filepath) {
         } else {
             iterationsWithoutImproving++;
         }
+
+        ll nHash = chash ^ rand_int[best_move_item];
          
         currentSolution.flip(best_move_item);
         currentValue += best_move_delta; 
@@ -146,7 +163,7 @@ int TABU_Optimized(const string& convergence_filepath) {
             for (int cj : conju[best_move_item]) itemsPorConj[cj]--;
         }
         
-        tabuList[best_move_item] = iter + TABU_TENURE;
+        tabuList[nHash] = iter + TABU_TENURE;
     }
  
     ofstream convergence_file(convergence_filepath);
