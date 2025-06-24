@@ -8,7 +8,7 @@
 #include <random>
 #include <algorithm>
 #include <bitset>
-#include <cassert> // Para testes de sanidade (debug)
+#include <cassert>
 
 using namespace std;
 
@@ -24,14 +24,14 @@ mt19937 rng((int)chrono::steady_clock::now().time_since_epoch().count());
 const double tempoLimite = 2.0;
 const double alpha = 0.999;
 const double temperatura_inicial = 1000.0;
-
-int Simulated_Annealing_Optimized() {
+ 
+int Simulated_Annealing_Optimized(const string& convergence_filepath) {
     // --- Estado da Solução ---
     bitset<1000> currentItems; 
     int somaPeso = 0;
     vector<int> itemsPorConj(quant_conj, 0);
 
-    // --- Inicialização (Começando com uma solução aleatória válida) ---
+    // --- Inicialização ---
     uniform_int_distribution<int> item_dist(0, itens - 1);
     for (int i = 0; i < itens; ++i) { 
         int item_idx = item_dist(rng);
@@ -40,8 +40,7 @@ int Simulated_Annealing_Optimized() {
             somaPeso += peso[item_idx];
         }
     }
-
-    // --- CÁLCULO COMPLETO APENAS UMA VEZ, PARA O ESTADO INICIAL ---
+ 
     int currentValue = 0;
     int initial_somaValor = 0;
     int initial_somaPenalidade = 0;
@@ -63,15 +62,17 @@ int Simulated_Annealing_Optimized() {
     
     // --- Variáveis do Algoritmo SA ---
     int bestValue = currentValue;
-    bitset<1000> bestItems = currentItems;
     
     double temperature = temperatura_inicial;
     int iterationsWithoutImproving = 0;
 
     uniform_real_distribution<double> prob_dist(0.0, 1.0);
     auto start_time = chrono::high_resolution_clock::now();
+ 
+    vector<pair<double, int>> convergence_data; 
+    convergence_data.push_back({0.0, bestValue});
 
-    // --- Loop Principal do Simulated Annealing (OTIMIZADO) ---
+    // --- Loop Principal ---
     while (true) {
         auto current_time = chrono::high_resolution_clock::now();
         double elapsed_time = chrono::duration<double>(current_time - start_time).count();
@@ -79,24 +80,19 @@ int Simulated_Annealing_Optimized() {
         if (elapsed_time > tempoLimite || iterationsWithoutImproving > 100000) {
             break;
         }
-
-        // 1. Gerar um vizinho aleatório
+        
         int itemFlip = item_dist(rng);
-
-        // 2. AVALIAÇÃO DELTA (cálculo rápido da mudança de valor)
         int delta = 0;
         
-        if (currentItems[itemFlip]) { // Tentar REMOVER o item
+        if (currentItems[itemFlip]) {
             delta = -lucro[itemFlip];
             for (int currConj : conju[itemFlip]) {
                 if (itemsPorConj[currConj] > inf_conj[currConj].first) {
                     delta += inf_conj[currConj].second;
                 }
             }
-        } else { // Tentar ADICIONAR o item
-            if (somaPeso + peso[itemFlip] > capacidade) {
-                continue; // Vizinho inválido
-            }
+        } else {
+            if (somaPeso + peso[itemFlip] > capacidade) continue;
             delta = lucro[itemFlip];
             for (int currConj : conju[itemFlip]) {
                 if (itemsPorConj[currConj] + 1 > inf_conj[currConj].first) {
@@ -105,35 +101,43 @@ int Simulated_Annealing_Optimized() {
             }
         }
         
-        // 3. Decidir se aceita o movimento
         if (delta > 0 || prob_dist(rng) < exp(delta / temperature)) {
-            // Movimento aceito! Atualizar o estado INCREMENTALMENTE
             currentItems.flip(itemFlip);
             currentValue += delta;
 
-            if (currentItems[itemFlip]) { // Se o item foi adicionado
+            if (currentItems[itemFlip]) {
                 somaPeso += peso[itemFlip];
                 for (int cj : conju[itemFlip]) itemsPorConj[cj]++;
-            } else { // Se o item foi removido
+            } else {
                 somaPeso -= peso[itemFlip];
                 for (int cj : conju[itemFlip]) itemsPorConj[cj]--;
             }
             
-            // Atualizar a melhor solução global encontrada
             if (currentValue > bestValue) {
                 bestValue = currentValue;
-                bestItems = currentItems;
-                iterationsWithoutImproving = 0;
+                iterationsWithoutImproving = 0; 
+                convergence_data.push_back({elapsed_time, bestValue});
             } else {
                 iterationsWithoutImproving++;
             }
         } else {
-            // Movimento rejeitado
             iterationsWithoutImproving++;
         }
-
-        // 4. Resfriar a temperatura
+        
         temperature *= alpha;
+    }
+     
+    ofstream convergence_file(convergence_filepath);
+    if(convergence_file.is_open()){ 
+        if (convergence_data.back().second < bestValue) {
+             convergence_data.push_back({tempoLimite, bestValue});
+        } else {
+             convergence_data.push_back({tempoLimite, convergence_data.back().second});
+        }
+        for(const auto& point : convergence_data){
+            convergence_file << point.first << " " << point.second << "\n";
+        }
+        convergence_file.close();
     }
 
     return bestValue;
@@ -141,13 +145,14 @@ int Simulated_Annealing_Optimized() {
 
 
 int main(int argc, char* argv[]) {
-    // ... (o seu main continua igual aqui) ...
-    if (argc != 3) {
-        cerr << "Uso: " << argv[0] << " <arquivo_entrada> <arquivo_saida>" << endl;
+    // MUDANÇA: Espera 4 argumentos
+    if (argc != 4) {
+        cerr << "Uso: " << argv[0] << " <arquivo_entrada> <arquivo_saida_final> <arquivo_saida_convergencia>" << endl;
         return 1;
     }
     string dir_entrada = argv[1];
-    string dir_saida = argv[2];
+    string dir_saida_final = argv[2];
+    string dir_saida_convergencia = argv[3];
 
     ifstream arquivo(dir_entrada);
     if (!arquivo.is_open()) {
@@ -177,18 +182,19 @@ int main(int argc, char* argv[]) {
     }
     arquivo.close();
 
-    auto start = chrono::high_resolution_clock::now();
-    int sol = Simulated_Annealing_Optimized();
+    auto start = chrono::high_resolution_clock::now(); 
+    int sol = Simulated_Annealing_Optimized(dir_saida_convergencia);
     auto end = chrono::high_resolution_clock::now();
     chrono::duration<double> time = end - start;
     double execution_time = time.count();
-
-    ofstream saida_arquivo(dir_saida, ios::app);
+ 
+    ofstream saida_arquivo(dir_saida_final, ios::app);
     if (!saida_arquivo.is_open()) {
-        cout << "Erro ao abrir " << dir_saida << " para escrita.\n";
+        cout << "Erro ao abrir " << dir_saida_final << " para escrita.\n";
         return 1;
     }
     saida_arquivo << sol << " " << execution_time << '\n';
     saida_arquivo.close();
+    
     return 0;
 }

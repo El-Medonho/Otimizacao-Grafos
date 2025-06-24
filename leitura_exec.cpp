@@ -2,8 +2,8 @@
 #include <string>
 #include <vector>
 #include <filesystem>
-#include <cstdlib> // Para system()
-#include <iomanip> // Para std::setw e std::left
+#include <cstdlib>
+#include <iomanip>
 
 int main() {
     // --- Configuração dos Experimentos ---
@@ -39,15 +39,18 @@ int main() {
                 for (const std::string& type : instanceTypes) {
                     for (const std::string& size : instanceSizes) {
                         
-                        // --- LÓGICA DE SAÍDA NÃO-AGREGADA ---
-                        // Cria um diretório de saída ÚNICO para cada execução (run).
-                        std::string outputDir = "./resultados/run_" + std::to_string(run) + "/" + algoName + "/" + type;
-                        std::filesystem::create_directories(outputDir);
+                        // --- DEFINIÇÃO DOS CAMINHOS DE SAÍDA ---
+                        // Diretório para resultados finais (valor e tempo)
+                        std::string outputDirFinal = "./resultados/run_" + std::to_string(run) + "/" + algoName + "/" + type;
+                        // Diretório para dados de convergência (histórico)
+                        std::string outputDirConv = "./convergencia/run_" + std::to_string(run) + "/" + algoName + "/" + type;
+                        
+                        std::filesystem::create_directories(outputDirFinal);
+                        std::filesystem::create_directories(outputDirConv);
 
-                        // O arquivo de saída agrega os 10 testes de uma mesma configuração, para uma dada execução.
-                        std::string outputFile = outputDir + "/saida_" + size + ".txt";
+                        // O arquivo de resultado final agrega as 10 instâncias da mesma configuração
+                        std::string outputFileFinal = outputDirFinal + "/saida_" + size + ".txt";
 
-                        // Feedback visual para o usuário
                         std::cout << "  > Cenário " << scenario << " | "
                                   << std::setw(20) << std::left << type 
                                   << "| Tamanho " << std::setw(4) << size << ": " << std::flush;
@@ -59,13 +62,20 @@ int main() {
                                                    "/" + size + "/kpfs_" + std::to_string(fileNum) + ".txt";
 
                             if (!std::filesystem::exists(inputFile)) {
-                                // Se o arquivo não existe, pulamos, mas não quebramos a barra de progresso
                                 std::cout << "X" << std::flush;
                                 continue;
                             }
 
-                            // Monta e executa o comando
-                            std::string command = "./" + algoName + " " + inputFile + " " + outputFile;
+                            // Constrói o nome do arquivo de convergência, único para esta instância e run
+                             std::string convFileName = "conv_s" + std::to_string(scenario) 
+                                                     + "_t" + type 
+                                                     + "_z" + size 
+                                                     + "_f" + std::to_string(fileNum) + ".txt";
+                            std::string outputFileConv = outputDirConv + "/" + convFileName;
+
+
+                            // Monta e executa o comando com os 3 caminhos de arquivo
+                            std::string command = "./" + algoName + " " + inputFile + " " + outputFileFinal + " " + outputFileConv;
                             
                             system(command.c_str());
                             std::cout << "." << std::flush; // Imprime um ponto para cada arquivo processado

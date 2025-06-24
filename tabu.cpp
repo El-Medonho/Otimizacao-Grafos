@@ -8,7 +8,7 @@
 #include <random>
 #include <algorithm>
 #include <bitset>
-#include <cassert> // Para testes de sanidade (debug)
+#include <cassert>
 
 using namespace std;
 
@@ -25,7 +25,6 @@ const double tempoLimite = 2.0;
 const int TABU_TENURE = 10;
 
 // Função para calcular o valor total de uma solução.
-// Usada apenas para a solução inicial, não no loop principal.
 int calculate_initial_state(const bitset<1000>& solution, int& out_somaPeso, vector<int>& itemsPorConj) {
     out_somaPeso = 0;
     int current_valor = 0;
@@ -50,9 +49,8 @@ int calculate_initial_state(const bitset<1000>& solution, int& out_somaPeso, vec
     }
     return current_valor - current_penalidade;
 }
-
-
-int TABU_Optimized() {
+ 
+int TABU_Optimized(const string& convergence_filepath) {
     // --- Estado da Solução ---
     bitset<1000> currentSolution;
     int somaPeso = 0;
@@ -72,11 +70,9 @@ int TABU_Optimized() {
     }
 
     // --- Variáveis da Busca Tabu ---
-    // O estado completo (incluindo itemsPorConj) é calculado apenas UMA VEZ.
     vector<int> itemsPorConj(quant_conj, 0);
     int currentValue = calculate_initial_state(currentSolution, somaPeso, itemsPorConj);
     
-    bitset<1000> bestSolution = currentSolution;
     int bestValue = currentValue;
     
     vector<int> tabuList(itens, 0);
@@ -84,8 +80,11 @@ int TABU_Optimized() {
     
     auto start_time = chrono::high_resolution_clock::now();
     int iter = 0;
+ 
+    vector<pair<double, int>> convergence_data; 
+    convergence_data.push_back({0.0, bestValue});
 
-    // --- Loop Principal da Busca Tabu (OTIMIZADO) ---
+    // --- Loop Principal da Busca Tabu ---
     while (true) {
         auto current_time = chrono::high_resolution_clock::now();
         double elapsed_time = chrono::duration<double>(current_time - start_time).count();
@@ -94,33 +93,26 @@ int TABU_Optimized() {
         }
         iter++;
 
-        // Encontrar o melhor vizinho não-tabu (ou que satisfaça o critério de aspiração)
         int best_neighbor_value = -2e9;
         int best_move_item = -1;
         int best_move_delta = 0;
 
         for (int itemFlip = 0; itemFlip < itens; ++itemFlip) {
-            // 1. AVALIAÇÃO DELTA: Calcular a mudança no valor de forma rápida
             int delta = 0;
-            if (currentSolution[itemFlip]) { // Tentar REMOVER
+            if (currentSolution[itemFlip]) {
                 delta = -lucro[itemFlip];
                 for (int cj : conju[itemFlip]) {
-                    if (itemsPorConj[cj] > inf_conj[cj].first) {
-                        delta += inf_conj[cj].second;
-                    }
+                    if (itemsPorConj[cj] > inf_conj[cj].first) delta += inf_conj[cj].second;
                 }
-            } else { // Tentar ADICIONAR
+            } else {
                 if (somaPeso + peso[itemFlip] > capacidade) continue;
                 delta = lucro[itemFlip];
                 for (int cj : conju[itemFlip]) {
-                    if (itemsPorConj[cj] + 1 > inf_conj[cj].first) {
-                        delta -= inf_conj[cj].second;
-                    }
+                    if (itemsPorConj[cj] + 1 > inf_conj[cj].first) delta -= inf_conj[cj].second;
                 }
             }
 
             int neighbor_value = currentValue + delta;
-            
             bool is_tabu = (tabuList[itemFlip] > iter);
             bool aspiration_met = (neighbor_value > bestValue);
 
@@ -134,44 +126,53 @@ int TABU_Optimized() {
         }
 
         if (best_move_item == -1) break; 
-        
-        // Realiza o melhor movimento encontrado e atualiza o estado INCREMENTALMENTE
-        currentSolution.flip(best_move_item);
-        currentValue += best_move_delta; 
-
-        if (currentSolution[best_move_item]) { // Se o item foi adicionado
-            somaPeso += peso[best_move_item];
-            for (int cj : conju[best_move_item]) itemsPorConj[cj]++;
-        } else { // Se o item foi removido
-            somaPeso -= peso[best_move_item];
-            for (int cj : conju[best_move_item]) itemsPorConj[cj]--;
-        }
-
-        // Atualiza a lista tabu
-        tabuList[best_move_item] = iter + TABU_TENURE;
-        
-        // Atualiza a melhor solução global
-        if (currentValue > bestValue) {
-            bestValue = currentValue;
-            bestSolution = currentSolution;
+         
+        if (best_neighbor_value > bestValue) {
+            bestValue = best_neighbor_value;
+            convergence_data.push_back({elapsed_time, bestValue});
             iterationsWithoutImproving = 0;
         } else {
             iterationsWithoutImproving++;
         }
+         
+        currentSolution.flip(best_move_item);
+        currentValue += best_move_delta; 
+
+        if (currentSolution[best_move_item]) {
+            somaPeso += peso[best_move_item];
+            for (int cj : conju[best_move_item]) itemsPorConj[cj]++;
+        } else {
+            somaPeso -= peso[best_move_item];
+            for (int cj : conju[best_move_item]) itemsPorConj[cj]--;
+        }
+        
+        tabuList[best_move_item] = iter + TABU_TENURE;
+    }
+ 
+    ofstream convergence_file(convergence_filepath);
+    if(convergence_file.is_open()){
+        if (convergence_data.back().second < bestValue) {
+             convergence_data.push_back({tempoLimite, bestValue});
+        } else {
+             convergence_data.push_back({tempoLimite, convergence_data.back().second});
+        }
+        for(const auto& point : convergence_data){
+            convergence_file << point.first << " " << point.second << "\n";
+        }
+        convergence_file.close();
     }
 
     return bestValue;
 }
 
-
-int main(int argc, char* argv[]) {
-    // ... (o seu main continua igual aqui) ...
-    if (argc != 3) {
-        cerr << "Uso: " << argv[0] << " <arquivo_entrada> <arquivo_saida>" << endl;
+int main(int argc, char* argv[]) { 
+    if (argc != 4) {
+        cerr << "Uso: " << argv[0] << " <arquivo_entrada> <arquivo_saida_final> <arquivo_saida_convergencia>" << endl;
         return 1;
     }
     string dir_entrada = argv[1];
-    string dir_saida = argv[2];
+    string dir_saida_final = argv[2];
+    string dir_saida_convergencia = argv[3];
 
     ifstream arquivo(dir_entrada);
     if (!arquivo.is_open()) {
@@ -201,18 +202,19 @@ int main(int argc, char* argv[]) {
     }
     arquivo.close();
 
-    auto start = chrono::high_resolution_clock::now();
-    int sol = TABU_Optimized();
+    auto start = chrono::high_resolution_clock::now(); 
+    int sol = TABU_Optimized(dir_saida_convergencia);
     auto end = chrono::high_resolution_clock::now();
     chrono::duration<double> time = end - start;
     double execution_time = time.count();
-
-    ofstream saida_arquivo(dir_saida, ios::app);
+ 
+    ofstream saida_arquivo(dir_saida_final, ios::app);
     if (!saida_arquivo.is_open()) {
-        cout << "Erro ao abrir " << dir_saida << " para escrita.\n";
+        cout << "Erro ao abrir " << dir_saida_final << " para escrita.\n";
         return 1;
     }
     saida_arquivo << sol << " " << execution_time << '\n';
     saida_arquivo.close();
+    
     return 0;
 }
